@@ -5,6 +5,8 @@ import { PhotoEntry, GeoLocation } from '../types';
 import { generatePhotoCaption } from '../services/geminiService';
 import { reverseGeocode } from '../services/geocodingService';
 import { useTranslation } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../services/supabaseClient';
 import exifr from 'exifr';
 
 interface AddPhotoModalProps {
@@ -21,17 +23,20 @@ const formatShutterSpeed = (exposureTime: number | undefined): string => {
 
 const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
   const { t, language } = useTranslation();
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [extractStatus, setExtractStatus] = useState<'idle' | 'success' | 'error'>('idle');
   
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     date: new Date().toISOString().split('T')[0],
-    url: '',
     locationName: '',
     lat: 0,
     lng: 0,
@@ -64,13 +69,14 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setSelectedFile(file);
     setIsExtracting(true);
     setExtractStatus('idle');
 
     // Preview
     const reader = new FileReader();
     reader.onload = (event) => {
-      setFormData(prev => ({ ...prev, url: event.target?.result as string }));
+      setPreviewUrl(event.target?.result as string);
     };
     reader.readAsDataURL(file);
 
@@ -118,21 +124,6 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
     }
   };
 
-  const handleGetCurrentLocation = () => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition((position) => {
-        const newLat = position.coords.latitude;
-        const newLng = position.coords.longitude;
-        setFormData(prev => ({
-          ...prev,
-          lat: newLat,
-          lng: newLng
-        }));
-        handleReverseGeocode(newLat, newLng);
-      });
-    }
-  };
-
   const handleAISuggest = async () => {
     if (!formData.locationName) return;
     setLoading(true);
@@ -141,33 +132,80 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
     setLoading(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.url) return;
+    if (!selectedFile || !user) return;
 
-    const newPhoto: PhotoEntry = {
-      id: Date.now().toString(),
-      title: formData.title,
-      description: formData.description,
-      date: formData.date,
-      url: formData.url,
-      location: {
+    setLoading(true);
+    try {
+      // 1. Upload file to Supabase Storage
+      const fileExt = selectedFile.name.split('.').pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('photos')
+        .upload(fileName, selectedFile);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get Public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('photos')
+        .getPublicUrl(fileName);
+
+      // 3. Save to Database
+      const photoPayload = {
+        title: formData.title,
+        description: formData.description,
+        date: formData.date,
+        url: publicUrl,
         lat: formData.lat,
         lng: formData.lng,
-        name: formData.locationName,
+        location_name: formData.locationName,
         country: formData.country,
-        region: formData.region
-      },
-      tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
-      parameters: {
+        region: formData.region,
+        tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
         camera: formData.camera,
         aperture: formData.aperture,
-        shutterSpeed: formData.shutterSpeed,
+        shutter_speed: formData.shutterSpeed,
         iso: formData.iso,
-        focalLength: formData.focalLength
-      }
-    };
-    onAdd(newPhoto);
+        focal_length: formData.focalLength,
+        user_id: user.id,
+        user_name: user.name
+      };
+
+      const { data: dbData, error: dbError } = await supabase
+        .from('photos')
+        .insert([photoPayload])
+        .select();
+
+      if (dbError) throw dbError;
+
+      const newPhoto: PhotoEntry = {
+        id: dbData[0].id,
+        ...photoPayload,
+        location: {
+          lat: formData.lat,
+          lng: formData.lng,
+          name: formData.locationName,
+          country: formData.country,
+          region: formData.region
+        },
+        parameters: {
+          camera: formData.camera,
+          aperture: formData.aperture,
+          shutterSpeed: formData.shutterSpeed,
+          iso: formData.iso,
+          focalLength: formData.focalLength
+        }
+      };
+
+      onAdd(newPhoto);
+    } catch (err) {
+      console.error('Submission failed:', err);
+      alert('Failed to save photo. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -187,10 +225,10 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest border-b pb-2">Photo Upload</h3>
             <div 
               onClick={() => fileInputRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-2xl aspect-video flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden ${formData.url ? 'border-blue-200 bg-blue-50/30' : 'border-gray-200 bg-gray-50 hover:border-blue-400 hover:bg-blue-50'}`}
+              className={`relative border-2 border-dashed rounded-2xl aspect-video flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden ${previewUrl ? 'border-blue-200 bg-blue-50/30' : 'border-gray-200 bg-gray-50 hover:border-blue-400 hover:bg-blue-50'}`}
             >
-              {formData.url ? (
-                <img src={formData.url} alt="Preview" className="w-full h-full object-cover" />
+              {previewUrl ? (
+                <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
               ) : (
                 <div className="text-center space-y-2 p-4">
                   <div className="mx-auto w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm border text-blue-600">
@@ -198,7 +236,7 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
                   </div>
                   <div>
                     <p className="font-bold text-gray-700">Choose a photo</p>
-                    <p className="text-xs text-gray-500 mt-1">Metadata will be extracted automatically</p>
+                    <p className="text-xs text-gray-500 mt-1">Cloud sync enabled</p>
                   </div>
                 </div>
               )}
@@ -210,11 +248,11 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
                 onChange={handleFileChange}
               />
               
-              {isExtracting && (
+              {(isExtracting || loading) && (
                 <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="text-blue-600 animate-spin" size={32} />
-                    <p className="text-xs font-bold text-blue-700">Extracting EXIF...</p>
+                    <p className="text-xs font-bold text-blue-700">{loading ? 'Uploading to Cloud...' : 'Extracting EXIF...'}</p>
                   </div>
                 </div>
               )}
@@ -223,7 +261,7 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
             {extractStatus === 'success' && (
               <div className="flex items-center gap-2 text-[10px] font-bold text-green-600 bg-green-50 p-2 rounded-lg border border-green-100 animate-in fade-in slide-in-from-top-1">
                 <CheckCircle2 size={14} />
-                Shooting parameters and GPS coordinates read successfully!
+                Metadata sync successful!
               </div>
             )}
           </section>
@@ -272,15 +310,6 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
                 </div>
               </div>
             </div>
-            {(formData.lat === 0) && (
-              <button 
-                type="button" 
-                onClick={handleGetCurrentLocation}
-                className="text-[10px] font-bold text-blue-600 flex items-center gap-1 hover:underline"
-              >
-                <MapPin size={10} /> {t.use_gps}
-              </button>
-            )}
           </section>
 
           <section className="space-y-4">
@@ -327,9 +356,10 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
           <div className="sticky bottom-0 bg-white pt-4 pb-2 border-t mt-4">
             <button 
               type="submit" 
-              disabled={!formData.url}
-              className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+              disabled={!previewUrl || loading}
+              className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <Loader2 className="animate-spin" size={18} />}
               {t.save_memory}
             </button>
           </div>

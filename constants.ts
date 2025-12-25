@@ -16,7 +16,10 @@ export const INITIAL_PHOTOS: PhotoEntry[] = [
       shutterSpeed: '1/200s',
       iso: '100',
       focalLength: '35mm'
-    }
+    },
+    // Fix: Added missing user_id and user_name
+    user_id: 'system',
+    user_name: 'Admin'
   },
   {
     id: '2',
@@ -32,7 +35,10 @@ export const INITIAL_PHOTOS: PhotoEntry[] = [
       shutterSpeed: '1/1000s',
       iso: '400',
       focalLength: '23mm'
-    }
+    },
+    // Fix: Added missing user_id and user_name
+    user_id: 'system',
+    user_name: 'Admin'
   },
   {
     id: '3',
@@ -48,7 +54,10 @@ export const INITIAL_PHOTOS: PhotoEntry[] = [
       shutterSpeed: '1/500s',
       iso: '200',
       focalLength: '50mm'
-    }
+    },
+    // Fix: Added missing user_id and user_name
+    user_id: 'system',
+    user_name: 'Admin'
   },
   {
     id: '4',
@@ -64,6 +73,9 @@ export const INITIAL_PHOTOS: PhotoEntry[] = [
       shutterSpeed: '1/2000s',
       iso: '100',
       focalLength: '28mm'
-    }
+    },
+    // Fix: Added missing user_id and user_name
+    user_id: 'system',
+    user_name: 'Admin'
   }
 ];

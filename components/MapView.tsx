@@ -75,7 +75,7 @@ const SelectionHandler: React.FC<{
   );
 };
 
-// Helper to center and zoom map when needed
+// Helper to center and zoom map when needed with smooth transitions
 const ZoomHandler: React.FC<{ photos: PhotoEntry[] }> = ({ photos }) => {
   const map = useMap();
   const prevPhotosRef = useRef<string>('');
@@ -91,12 +91,16 @@ const ZoomHandler: React.FC<{ photos: PhotoEntry[] }> = ({ photos }) => {
       const bounds = L.latLngBounds(validPhotos.map(p => [p.location.lat, p.location.lng]));
       
       if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
-        map.flyTo(bounds.getCenter(), 10, { duration: 1.5 });
+        map.flyTo(bounds.getCenter(), 10, { 
+          duration: 1.5,
+          easeLinearity: 0.25 
+        });
       } else {
         map.flyToBounds(bounds, {
           padding: [50, 50],
           maxZoom: 12,
-          duration: 1.5
+          duration: 1.5,
+          easeLinearity: 0.25
         });
       }
     }
@@ -187,6 +191,8 @@ const MapView: React.FC<MapViewProps> = ({ photos, onMarkerClick, onAreaSelect }
         zoom={2.5} 
         scrollWheelZoom={true}
         className="h-full w-full"
+        zoomAnimation={true}
+        markerZoomAnimation={true}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

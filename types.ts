@@ -30,6 +30,8 @@ export interface PhotoEntry {
   location: GeoLocation;
   tags: string[];
   parameters?: ShootingParameters;
+  user_id: string;
+  user_name?: string; // For displaying who uploaded it
 }
 
 export interface LocationGroup {

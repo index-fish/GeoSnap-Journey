@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { PhotoEntry } from '../types';
-import { Calendar, MapPin, Camera, Zap } from 'lucide-react';
+import { Calendar, MapPin, Camera, Zap, User } from 'lucide-react';
 import { useTranslation } from '../context/LanguageContext';
 
 interface PhotoCardProps {
@@ -14,7 +14,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick }) => {
   
   return (
     <div 
-      className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all cursor-pointer group border border-transparent hover:border-blue-100"
+      className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all cursor-pointer group border border-transparent hover:border-blue-100 flex flex-col"
       onClick={() => onClick(photo)}
     >
       <div className="relative aspect-[4/3] overflow-hidden">
@@ -22,7 +22,14 @@ const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick }) => {
           src={photo.url} 
           alt={photo.title} 
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+          loading="lazy"
         />
+        {/* Author Badge */}
+        <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-md text-[9px] text-white rounded-lg flex items-center gap-1.5 font-bold uppercase tracking-widest border border-white/10">
+          <User size={10} className="text-blue-400" />
+          {photo.user_name}
+        </div>
+        
         {/* Overlay Badges */}
         <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
           <div className="flex gap-1">
@@ -41,8 +48,8 @@ const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick }) => {
         </div>
       </div>
       
-      <div className="p-4">
-        <h3 className="font-bold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors">{photo.title}</h3>
+      <div className="p-4 flex-1 flex flex-col">
+        <h3 className="font-bold text-gray-900 mb-1 group-hover:text-blue-600 transition-colors line-clamp-1">{photo.title}</h3>
         
         {/* Technical Summary */}
         {photo.parameters && (
@@ -55,13 +62,13 @@ const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick }) => {
           </div>
         )}
 
-        <div className="flex items-center justify-between text-xs text-gray-400">
+        <div className="mt-auto flex items-center justify-between text-[10px] text-gray-400">
           <div className="flex items-center gap-1">
-            <Calendar size={12} />
+            <Calendar size={10} />
             <span>{new Date(photo.date).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US')}</span>
           </div>
-          <div className="flex items-center gap-1 max-w-[120px] truncate">
-            <MapPin size={12} />
+          <div className="flex items-center gap-1 max-w-[100px] truncate">
+            <MapPin size={10} />
             <span className="truncate">{photo.location.name}</span>
           </div>
         </div>

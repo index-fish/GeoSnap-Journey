@@ -13,6 +13,7 @@
     "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
     "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
     "@google/genai": "https://esm.sh/@google/genai",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3",
     "lucide-react": "https://esm.sh/lucide-react?deps=react@18.2.0",
     "leaflet": "https://esm.sh/leaflet@1.9.4",
     "react-leaflet": "https://esm.sh/react-leaflet@4.2.1?deps=react@18.2.0,react-dom@18.2.0,leaflet@1.9.4",
@@ -45,10 +46,23 @@
       height: 100%;
       z-index: 1;
     }
+    /* Smooth zooming and tile fading */
+    .leaflet-fade-anim .leaflet-tile, .leaflet-zoom-anim .leaflet-zoom-animated {
+      will-change: transform;
+      transition: transform 0.25s cubic-bezier(0,0,0.25,1);
+    }
     /* Fix for Lucide icons rendering as objects in some ESM environments */
     svg {
       display: inline-block;
       vertical-align: middle;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+    .animate-shake {
+      animation: shake 0.2s ease-in-out 0s 2;
     }
   </style>
 </head>

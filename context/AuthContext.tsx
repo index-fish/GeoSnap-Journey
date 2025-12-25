@@ -1,6 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 interface AuthContextType {
   user: User | null;
@@ -17,45 +18,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('geosnap_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setIsLoading(false);
+    // Check active sessions and sets the user
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          name: session.user.user_metadata.name || session.user.email?.split('@')[0] || 'User',
+          email: session.user.email || ''
+        });
+      }
+      setIsLoading(false);
+    };
+
+    getSession();
+
+    // Listen for changes on auth state (login, logout, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          name: session.user.user_metadata.name || session.user.email?.split('@')[0] || 'User',
+          email: session.user.email || ''
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const login = async (email: string, password: string) => {
-    // Simulated auth logic
-    const users = JSON.parse(localStorage.getItem('geosnap_accounts') || '[]');
-    const foundUser = users.find((u: any) => u.email === email && u.password === password);
-    
-    if (foundUser) {
-      const userData = { id: foundUser.id, name: foundUser.name, email: foundUser.email };
-      setUser(userData);
-      localStorage.setItem('geosnap_user', JSON.stringify(userData));
-    } else {
-      throw new Error('Invalid email or password');
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   };
 
   const register = async (name: string, email: string, password: string) => {
-    const users = JSON.parse(localStorage.getItem('geosnap_accounts') || '[]');
-    if (users.some((u: any) => u.email === email)) {
-      throw new Error('Email already exists');
-    }
-
-    const newUser = { id: Date.now().toString(), name, email, password };
-    users.push(newUser);
-    localStorage.setItem('geosnap_accounts', JSON.stringify(users));
-    
-    const userData = { id: newUser.id, name: newUser.name, email: newUser.email };
-    setUser(userData);
-    localStorage.setItem('geosnap_user', JSON.stringify(userData));
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name }
+      }
+    });
+    if (error) throw error;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('geosnap_user');
   };
 
   return (

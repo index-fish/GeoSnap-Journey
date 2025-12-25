@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Camera, Map as MapIcon, Image as ImageIcon, Plus, Compass, Search, Github, Info, Sliders, Calendar, MapPin, Tag, Languages, Globe, ChevronRight, LayoutGrid, Edit2, X, Filter, RotateCcw, LogOut, User as UserIcon, Loader2 } from 'lucide-react';
-import { get, set } from 'idb-keyval';
 import L from 'leaflet';
 import MapView from './components/MapView';
 import GalleryView from './components/GalleryView';
@@ -10,10 +9,11 @@ import EditPhotoModal from './components/EditPhotoModal';
 import ManageMemoriesView from './components/ManageMemoriesView';
 import AuthModal from './components/AuthModal';
 import { PhotoEntry, LocationGroup } from './types';
-import { INITIAL_PHOTOS } from './constants';
 import { useTranslation } from './context/LanguageContext';
 import { useAuth } from './context/AuthContext';
 import { Language } from './translations';
+import { supabase } from './services/supabaseClient';
+import { INITIAL_PHOTOS } from './constants';
 
 const isValidCoord = (n: any) => typeof n === 'number' && !isNaN(n);
 
@@ -21,8 +21,8 @@ const App: React.FC = () => {
   const { t, language, setLanguage } = useTranslation();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
   
-  const [photos, setPhotos] = useState<PhotoEntry[]>(INITIAL_PHOTOS);
-  const [isDBLoaded, setIsDBLoaded] = useState(false);
+  const [photos, setPhotos] = useState<PhotoEntry[]>([]);
+  const [isSyncing, setIsSyncing] = useState(true);
   const [currentView, setCurrentView] = useState<'map' | 'manage'>('map');
   
   const [selectedGroup, setSelectedGroup] = useState<LocationGroup | null>(null);
@@ -41,31 +41,59 @@ const App: React.FC = () => {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  // Load photos from IndexedDB on mount
+  // Load photos from Supabase on mount and user change
   useEffect(() => {
-    const loadPhotos = async () => {
+    const fetchPhotos = async () => {
+      setIsSyncing(true);
       try {
-        const saved = await get('geosnap_photos');
-        if (saved && Array.isArray(saved)) {
-          setPhotos(saved);
+        const { data, error } = await supabase
+          .from('photos')
+          .select('*')
+          .order('date', { ascending: false });
+
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          const formattedPhotos: PhotoEntry[] = data.map(item => ({
+            id: item.id,
+            url: item.url,
+            title: item.title,
+            description: item.description,
+            date: item.date,
+            location: {
+              lat: item.lat,
+              lng: item.lng,
+              name: item.location_name,
+              country: item.country,
+              region: item.region
+            },
+            tags: item.tags || [],
+            parameters: {
+              camera: item.camera,
+              aperture: item.aperture,
+              shutterSpeed: item.shutter_speed,
+              iso: item.iso,
+              focalLength: item.focal_length
+            },
+            user_id: item.user_id,
+            user_name: item.user_name || 'Anonymous'
+          }));
+          setPhotos(formattedPhotos);
+        } else {
+          // Fallback to initial photos if cloud database is empty
+          setPhotos(INITIAL_PHOTOS);
         }
       } catch (err) {
-        console.error('Failed to load photos from IndexedDB:', err);
+        console.error('Failed to fetch photos from Supabase, falling back to local data:', err);
+        // Fallback to local data on error (e.g., missing credentials or network issues)
+        setPhotos(INITIAL_PHOTOS);
       } finally {
-        setIsDBLoaded(true);
+        setIsSyncing(false);
       }
     };
-    loadPhotos();
-  }, []);
 
-  // Save photos to IndexedDB whenever they change
-  useEffect(() => {
-    if (isDBLoaded) {
-      set('geosnap_photos', photos).catch(err => {
-        console.error('Failed to save photos to IndexedDB:', err);
-      });
-    }
-  }, [photos, isDBLoaded]);
+    fetchPhotos();
+  }, [user]);
 
   const handleAddPhoto = (newPhoto: PhotoEntry) => {
     setPhotos(prev => [newPhoto, ...prev]);
@@ -112,7 +140,6 @@ const App: React.FC = () => {
     setSearchQuery('');
   };
 
-  // Grouping logic for the Region Browser
   const regionHierarchy = useMemo(() => {
     const hierarchy: Record<string, Set<string>> = {};
     photos.forEach(p => {
@@ -179,6 +206,8 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
+          {isSyncing && <Loader2 className="animate-spin text-blue-500" size={16} />}
+          
           <div className="flex bg-gray-100 p-1 rounded-full border border-gray-200">
             <button 
               onClick={() => setCurrentView('map')}
@@ -363,7 +392,10 @@ const App: React.FC = () => {
                       </div>
                       <div className="flex-1 min-w-0 flex flex-col justify-center">
                         <h3 className="font-bold text-sm truncate text-gray-800">{photo.title}</h3>
-                        <p className="text-[11px] text-gray-500 truncate flex items-center gap-1"><MapPin size={10}/> {photo.location.name}</p>
+                        <div className="flex flex-col gap-0.5 mt-0.5">
+                          <p className="text-[10px] text-gray-500 truncate flex items-center gap-1"><MapPin size={9}/> {photo.location.name}</p>
+                          <p className="text-[9px] text-blue-600 font-bold uppercase">By {photo.user_name}</p>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -432,21 +464,28 @@ const App: React.FC = () => {
             </div>
 
             <div className="w-full lg:w-96 flex flex-col gap-6 text-white p-2">
-              {/* Header Actions - Moved here to prevent overlapping technical specs */}
-              <div className="flex items-center justify-end gap-3 mb-2">
-                <button 
-                  onClick={() => setIsEditing(selectedPhoto)}
-                  className="text-white/70 hover:text-blue-400 transition-colors p-2 bg-white/10 rounded-full hover:bg-white/20 flex items-center gap-2 px-4 border border-white/5"
-                >
-                  <Edit2 size={16} />
-                  <span className="text-xs font-bold uppercase tracking-widest">{t.edit_action}</span>
-                </button>
-                <button 
-                  onClick={() => setSelectedPhoto(null)}
-                  className="text-white/70 hover:text-white transition-colors p-2 bg-white/10 rounded-full hover:bg-white/20 border border-white/5"
-                >
-                  <X size={20} />
-                </button>
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-blue-400 font-black uppercase tracking-[0.2em]">Captured By</span>
+                  <span className="text-sm font-bold text-white">{selectedPhoto.user_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {user?.id === selectedPhoto.user_id && (
+                    <button 
+                      onClick={() => setIsEditing(selectedPhoto)}
+                      className="text-white/70 hover:text-blue-400 transition-colors p-2 bg-white/10 rounded-full hover:bg-white/20 flex items-center gap-2 px-4 border border-white/5"
+                    >
+                      <Edit2 size={16} />
+                      <span className="text-xs font-bold uppercase tracking-widest">{t.edit_action}</span>
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setSelectedPhoto(null)}
+                    className="text-white/70 hover:text-white transition-colors p-2 bg-white/10 rounded-full hover:bg-white/20 border border-white/5"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2">

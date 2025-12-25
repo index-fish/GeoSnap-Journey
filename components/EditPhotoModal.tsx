@@ -5,6 +5,7 @@ import { PhotoEntry } from '../types';
 import { generatePhotoCaption } from '../services/geminiService';
 import { reverseGeocode } from '../services/geocodingService';
 import { useTranslation } from '../context/LanguageContext';
+import { supabase } from '../services/supabaseClient';
 
 interface EditPhotoModalProps {
   photo: PhotoEntry;
@@ -58,36 +59,76 @@ const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, onUpdat
     setLoading(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updatedPhoto: PhotoEntry = {
-      ...photo,
-      title: formData.title,
-      description: formData.description,
-      date: formData.date,
-      location: {
-        ...photo.location,
-        lat: formData.lat,
-        lng: formData.lng,
-        name: formData.locationName,
-        country: formData.country,
-        region: formData.region
-      },
-      tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
-      parameters: {
-        camera: formData.camera,
-        aperture: formData.aperture,
-        shutterSpeed: formData.shutterSpeed,
-        iso: formData.iso,
-        focalLength: formData.focalLength
-      }
-    };
-    onUpdate(updatedPhoto);
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('photos')
+        .update({
+          title: formData.title,
+          description: formData.description,
+          date: formData.date,
+          lat: formData.lat,
+          lng: formData.lng,
+          location_name: formData.locationName,
+          country: formData.country,
+          region: formData.region,
+          tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
+          camera: formData.camera,
+          aperture: formData.aperture,
+          shutter_speed: formData.shutterSpeed,
+          iso: formData.iso,
+          focal_length: formData.focalLength
+        })
+        .eq('id', photo.id);
+
+      if (error) throw error;
+
+      const updatedPhoto: PhotoEntry = {
+        ...photo,
+        title: formData.title,
+        description: formData.description,
+        date: formData.date,
+        location: {
+          ...photo.location,
+          lat: formData.lat,
+          lng: formData.lng,
+          name: formData.locationName,
+          country: formData.country,
+          region: formData.region
+        },
+        tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
+        parameters: {
+          camera: formData.camera,
+          aperture: formData.aperture,
+          shutterSpeed: formData.shutterSpeed,
+          iso: formData.iso,
+          focalLength: formData.focalLength
+        }
+      };
+      onUpdate(updatedPhoto);
+    } catch (err) {
+      console.error('Update failed:', err);
+      alert('Failed to update photo.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteClick = () => {
+  const handleDeleteClick = async () => {
     if (onDelete && window.confirm(t.confirm_delete)) {
-      onDelete(photo.id);
+      setLoading(true);
+      try {
+        const { error } = await supabase.from('photos').delete().eq('id', photo.id);
+        if (error) throw error;
+        onDelete(photo.id);
+      } catch (err) {
+        console.error('Delete failed:', err);
+        alert('Failed to delete photo.');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -105,7 +146,8 @@ const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, onUpdat
               <button 
                 type="button" 
                 onClick={handleDeleteClick}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                disabled={loading}
+                className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
                 title={t.delete_memory}
               >
                 <Trash2 size={20} />
@@ -116,8 +158,13 @@ const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, onUpdat
         </div>
 
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-6">
-          <div className="aspect-video rounded-xl overflow-hidden border bg-gray-100">
+          <div className="aspect-video rounded-xl overflow-hidden border bg-gray-100 relative">
             <img src={photo.url} alt={photo.title} className="w-full h-full object-cover" />
+            {loading && (
+              <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center">
+                <Loader2 className="animate-spin text-blue-600" size={32} />
+              </div>
+            )}
           </div>
 
           <section className="space-y-4">
@@ -190,22 +237,10 @@ const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, onUpdat
             </div>
           </section>
 
-          <section className="space-y-4">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest border-b pb-2">{t.narrative}</h3>
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="text-xs font-bold text-gray-500">{t.story_label}</label>
-                <button type="button" onClick={handleAISuggest} disabled={loading} className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 disabled:opacity-50 font-bold uppercase tracking-wider">
-                  {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} {t.ai_generate}
-                </button>
-              </div>
-              <textarea rows={3} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none resize-none" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}/>
-            </div>
-          </section>
-
           <div className="sticky bottom-0 bg-white pt-4 pb-2 border-t mt-4">
             <button 
               type="submit" 
+              disabled={loading}
               className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 flex items-center justify-center gap-2"
             >
               <Save size={18} />
