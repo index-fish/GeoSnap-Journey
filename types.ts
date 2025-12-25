@@ -1,4 +1,10 @@
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface GeoLocation {
   lat: number;
   lng: number;

@@ -1,8 +1,9 @@
 
-import React, { useState, useRef } from 'react';
-import { X, MapPin, Loader2, Sparkles, Camera, Sliders, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, MapPin, Loader2, Sparkles, Camera, Sliders, Upload, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { PhotoEntry, GeoLocation } from '../types';
 import { generatePhotoCaption } from '../services/geminiService';
+import { reverseGeocode } from '../services/geocodingService';
 import { useTranslation } from '../context/LanguageContext';
 import exifr from 'exifr';
 
@@ -19,10 +20,11 @@ const formatShutterSpeed = (exposureTime: number | undefined): string => {
 };
 
 const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [extractStatus, setExtractStatus] = useState<'idle' | 'success' | 'error'>('idle');
   
   const [formData, setFormData] = useState({
@@ -33,6 +35,8 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
     locationName: '',
     lat: 0,
     lng: 0,
+    country: '',
+    region: '',
     tags: '',
     camera: '',
     aperture: '',
@@ -40,6 +44,21 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
     iso: '',
     focalLength: ''
   });
+
+  const handleReverseGeocode = async (lat: number, lng: number) => {
+    if (lat === 0 && lng === 0) return;
+    setIsGeocoding(true);
+    const result = await reverseGeocode(lat, lng, language);
+    if (result) {
+      setFormData(prev => ({
+        ...prev,
+        locationName: result.name,
+        country: result.country,
+        region: result.region
+      }));
+    }
+    setIsGeocoding(false);
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -67,6 +86,9 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
           ? `${output.Make} ${output.Model}` 
           : (output.Model || output.Make || '');
 
+        const newLat = output.latitude || 0;
+        const newLng = output.longitude || 0;
+
         setFormData(prev => ({
           ...prev,
           camera: camera,
@@ -77,10 +99,14 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
           date: output.DateTimeOriginal 
             ? new Date(output.DateTimeOriginal).toISOString().split('T')[0] 
             : prev.date,
-          lat: output.latitude || prev.lat,
-          lng: output.longitude || prev.lng
+          lat: newLat,
+          lng: newLng
         }));
         setExtractStatus('success');
+
+        if (newLat && newLng) {
+          handleReverseGeocode(newLat, newLng);
+        }
       } else {
         setExtractStatus('error');
       }
@@ -95,11 +121,14 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
   const handleGetCurrentLocation = () => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition((position) => {
+        const newLat = position.coords.latitude;
+        const newLng = position.coords.longitude;
         setFormData(prev => ({
           ...prev,
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
+          lat: newLat,
+          lng: newLng
         }));
+        handleReverseGeocode(newLat, newLng);
       });
     }
   };
@@ -125,7 +154,9 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
       location: {
         lat: formData.lat,
         lng: formData.lng,
-        name: formData.locationName
+        name: formData.locationName,
+        country: formData.country,
+        region: formData.region
       },
       tags: formData.tags.split(',').map(t => t.trim()).filter(t => t !== ''),
       parameters: {
@@ -144,7 +175,7 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-6 border-b flex items-center justify-between sticky top-0 bg-white z-10">
-          <h2 className="text-xl font-bold flex items-center gap-2">
+          <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800">
             <Camera className="text-blue-600" size={24} />
             {t.add_modal_title}
           </h2>
@@ -152,7 +183,6 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="overflow-y-auto p-6 space-y-6">
-          {/* File Upload Area */}
           <section className="space-y-4">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest border-b pb-2">Photo Upload</h3>
             <div 
@@ -193,13 +223,7 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
             {extractStatus === 'success' && (
               <div className="flex items-center gap-2 text-[10px] font-bold text-green-600 bg-green-50 p-2 rounded-lg border border-green-100 animate-in fade-in slide-in-from-top-1">
                 <CheckCircle2 size={14} />
-                Shooting parameters read successfully from image!
-              </div>
-            )}
-            {extractStatus === 'error' && (
-              <div className="flex items-center gap-2 text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-100">
-                <AlertCircle size={14} />
-                No camera metadata found in this image.
+                Shooting parameters and GPS coordinates read successfully!
               </div>
             )}
           </section>
@@ -211,7 +235,7 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
               <input 
                 required
                 type="text" 
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder={t.title_placeholder}
                 value={formData.title}
                 onChange={e => setFormData({...formData, title: e.target.value})}
@@ -222,11 +246,41 @@ const AddPhotoModal: React.FC<AddPhotoModalProps> = ({ onClose, onAdd }) => {
                 <label className="block text-xs font-bold text-gray-500 mb-1">{t.date}</label>
                 <input required type="date" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})}/>
               </div>
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-bold text-gray-500 mb-1">{t.location_name}</label>
-                <input required type="text" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none" placeholder={t.location_placeholder} value={formData.locationName} onChange={e => setFormData({...formData, locationName: e.target.value})}/>
+                <div className="relative">
+                  <input 
+                    required 
+                    type="text" 
+                    className="w-full pl-4 pr-10 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                    placeholder={t.location_placeholder} 
+                    value={formData.locationName} 
+                    onChange={e => setFormData({...formData, locationName: e.target.value})}
+                  />
+                  {isGeocoding ? (
+                    <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />
+                  ) : formData.lat !== 0 && (
+                    <button 
+                      type="button" 
+                      onClick={() => handleReverseGeocode(formData.lat, formData.lng)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-600 transition-colors"
+                      title="Update location name from GPS"
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+            {(formData.lat === 0) && (
+              <button 
+                type="button" 
+                onClick={handleGetCurrentLocation}
+                className="text-[10px] font-bold text-blue-600 flex items-center gap-1 hover:underline"
+              >
+                <MapPin size={10} /> {t.use_gps}
+              </button>
+            )}
           </section>
 
           <section className="space-y-4">
