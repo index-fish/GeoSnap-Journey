@@ -1,0 +1,8 @@
+{
+  "name": "GeoSnap Journey",
+  "description": "A visual travel diary that maps your photographic adventures across the globe with interactive galleries and AI-powered storytelling.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
